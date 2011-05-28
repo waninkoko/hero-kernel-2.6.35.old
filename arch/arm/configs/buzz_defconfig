@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
 # Linux kernel version: 2.6.35.13
-# Tue May 24 00:16:00 2011
+# Fri May 27 00:18:42 2011
 #
 CONFIG_ARM=y
 CONFIG_SYS_SUPPORTS_APM_EMULATION=y
@@ -825,7 +825,7 @@ CONFIG_BT_BNEP=y
 # CONFIG_BT_BNEP_MC_FILTER is not set
 # CONFIG_BT_BNEP_PROTO_FILTER is not set
 CONFIG_BT_HIDP=y
-CONFIG_BT_HID_BRCM=y
+# CONFIG_BT_HID_BRCM is not set
 
 #
 # Bluetooth device drivers
