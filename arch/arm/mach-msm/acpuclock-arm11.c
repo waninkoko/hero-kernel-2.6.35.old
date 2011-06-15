@@ -612,6 +612,7 @@ static void __init acpuclk_init(void)
 	/*
 	 * Determine the rate of ACPU clock
 	 */
+#if !defined(CONFIG_ARCH_MSM7225)
 		if (socinfo_init() < 0)
 			BUG();
 
@@ -622,6 +623,7 @@ static void __init acpuclk_init(void)
 				printk("7x27-t write A11S_CLK_CNTL_ADDR =0x2220\n");
 				writel(0x2220,A11S_CLK_CNTL_ADDR);
 			}
+#endif
 
 	if (!(readl(A11S_CLK_SEL_ADDR) & 0x01)) { /* CLK_SEL_SRC1N0 */
 		/* CLK_SRC0_SEL */
@@ -721,6 +723,9 @@ static void __init acpu_freq_tbl_fixup(void)
 
 	/* Select the right table to use. */
 	for (lst = acpu_freq_tbl_list; lst->tbl != 0; lst++) {
+#if defined(CONFIG_ARCH_MSM7225)
+		if (lst->machine == machine_arch_type) {
+#else
 		if ((lst->machine == MACH_TYPE_CHACHA)||(lst->machine == MACH_TYPE_ICONG)){
 				if (socinfo_init() < 0)
 					BUG();
@@ -740,6 +745,7 @@ static void __init acpu_freq_tbl_fixup(void)
 				}
 			}
 		else if (lst->machine == machine_arch_type) {
+#endif
 			acpu_freq_tbl = lst->tbl;
 			freq_table = lst->freq_tbl;
 			break;
