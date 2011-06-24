@@ -16,7 +16,7 @@
 #include <linux/notifier.h>
 #include <linux/power_supply.h>
 
-#if CONFIG_TPS65200_BUZZ
+#if defined(CONFIG_TPS65200_BUZZ)
 #define BATT_EVENT_SUSPEND	0x01
 #define CHECK_CHG		0X64
 #define SET_ICL500		0X65
