@@ -1101,7 +1101,11 @@ static struct file_operations debug_fops = {
 };
 #endif
 
+#ifdef CONFIG_MACH_HERO
+#define BITS_PER_PIXEL_DEF 16
+#else
 #define BITS_PER_PIXEL_DEF 32
+#endif
 
 static void setup_fb_info(struct msmfb_info *msmfb)
 {
