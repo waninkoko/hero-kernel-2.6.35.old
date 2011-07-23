@@ -101,7 +101,9 @@ obj-$(CONFIG_ARCH_MSM7X30) += rpc_pmapp.o smd_rpcrouter_clients.o
 obj-$(CONFIG_MSM_SMD) += smd.o smd_debug.o
 obj-$(CONFIG_MSM_SMD) += smem_log.o
 ifndef CONFIG_ARCH_MSM7225
+ifndef CONFIG_ARCH_MSM7X00A
 obj-$(CONFIG_MSM_SMD) += socinfo.o
+endif
 endif
 obj-$(CONFIG_MSM_SMD) += last_radio_log.o
 obj-$(CONFIG_MSM_ONCRPCROUTER) += smd_rpcrouter_device.o

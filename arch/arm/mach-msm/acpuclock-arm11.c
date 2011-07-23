@@ -30,12 +30,10 @@
 #include <linux/io.h>
 #include <mach/board.h>
 #include <mach/msm_iomap.h>
-#include <mach/clk.h>
 
 #include "proc_comm.h"
 #include "acpuclock.h"
-#include <asm/mach-types.h>
-#include <mach/socinfo.h>
+
 
 #define A11S_CLK_CNTL_ADDR (MSM_CSR_BASE + 0x100)
 #define A11S_CLK_SEL_ADDR (MSM_CSR_BASE + 0x104)
@@ -51,12 +49,8 @@
 #define ACPU_PLL_2	2
 #define ACPU_PLL_3	3
 
-enum {
-	PERF_SWITCH_DEBUG = 1U << 0,
-	PERF_SWITCH_STEP_DEBUG = 1U << 1,
-	PERF_SWITCH_PLL_DEBUG = 1U << 2,
-	PERF_SWITCH_VDD_DEBUG = 1U << 3,
-};
+#define PERF_SWITCH_DEBUG 0
+#define PERF_SWITCH_STEP_DEBUG 0
 
 struct clock_state
 {
@@ -74,7 +68,6 @@ static struct clock_state drv_state = { 0 };
 
 static void __init acpuclk_init(void);
 
-/* MSM7201A Levels 3-6 all correspond to 1.2V, level 7 corresponds to 1.325V. */
 enum {
 	VDD_0 = 0,
 	VDD_1 = 1,
@@ -105,115 +98,75 @@ struct clkctl_acpu_speed {
 
 /*
  * ACPU speed table. Complete table is shown but certain speeds are commented
- * out to optimized speed switching. Initalize loops_per_jiffy to 0.
+ * out to optimized speed switching. Initialize loops_per_jiffy to 0.
  *
  * Table stepping up/down is optimized for 256mhz jumps while staying on the
  * same PLL.
  */
-static struct clkctl_acpu_speed *acpu_freq_tbl;
-/* PLL0(mpll): 960MHz, PLL1(gpll):245.76MHz, PLL2(bpll): 1200MHz */
-static struct clkctl_acpu_speed msm7227_tbl[] = {
-	{  19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, -1, 4 },
-	{  120000, ACPU_PLL_0, 4, 7,  60000, 1, VDD_3, 61440, 0, -1, 5 },
-	{  122880, ACPU_PLL_1, 1, 1,  61440, 1, VDD_3, 61440, 0, -1, 4 },
-	{  200000, ACPU_PLL_2, 2, 5,  66667, 2, VDD_4, 61440, 0, -1, 6 },
-	{  245760, ACPU_PLL_1, 1, 0, 122880, 1, VDD_4, 122880, 0, -1, 7 },
-	{  320000, ACPU_PLL_0, 4, 2, 160000, 1, VDD_5, 160000, 0, 1, 7 },
-	{  400000, ACPU_PLL_2, 2, 2, 133333, 2, VDD_5, 160000, 0, 3, -1 },
-	{  480000, ACPU_PLL_0, 4, 1, 160000, 2, VDD_6, 160000, 0, 5, -1 },
-	{  600000, ACPU_PLL_2, 2, 1, 200000, 2, VDD_7, 200000, 0, 6, -1 },
-	{  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-};
-
-/* PLL0(mpll): 960MHz, PLL1(gpll):245.76MHz, PLL2(bpll): 800MHz */
-static struct clkctl_acpu_speed msm7227_turbo_tbl[] = {
-	{  19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, -1, 4 },
-	{  120000, ACPU_PLL_0, 4, 7,  60000, 1, VDD_3, 61440, 0, -1, 5 },
-	{  122880, ACPU_PLL_1, 1, 1,  61440, 1, VDD_3, 61440, 0, -1, 4 },
-	{  200000, ACPU_PLL_2, 2, 5,  66667, 2, VDD_4, 61440, 0, -1, 6 },
-	{  245760, ACPU_PLL_1, 1, 0, 122880, 1, VDD_4, 122880, 0, -1, 7 },
-	{  320000, ACPU_PLL_0, 4, 2, 160000, 1, VDD_5, 160000, 0, 1, 7 },
-	{  400000, ACPU_PLL_2, 2, 2, 133333, 2, VDD_5, 160000, 0, 3, -1 },
-	{  480000, ACPU_PLL_0, 4, 1, 160000, 2, VDD_6, 160000, 0, 5, -1 },
-	{  800000, ACPU_PLL_2, 2, 0, 200000, 2, VDD_7, 200000, 0, 6, -1 },
-	{  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-};
-
-/* 7200a turbo mode, PLL0(mpll):245.76, PLL1(gpll):960, PLL2(bpll0):1056 */
-static struct clkctl_acpu_speed  msm72xx_tbl[] = {
-#if defined(CONFIG_TURBO_MODE)
-	{ 19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, 0, 4 },
-	{ 122880, ACPU_PLL_0, 4, 1, 61440, 1, VDD_1, 61440, 0, 0, 4 },
-	{ 160000, ACPU_PLL_1, 1, 5, 53333, 2, VDD_1, 61440, 0, 0, 6 },
-	{ 176000, ACPU_PLL_2, 2, 5, 88000, 1, VDD_1, 61440, 0, 0, 5 },
-	{ 245760, ACPU_PLL_0, 4, 0, 81920, 2, VDD_2, 61440, 0, 0, 5 },
-	{ 352000, ACPU_PLL_2, 2, 2, 88000, 3, VDD_4, 128000, 0, 3, 7 },
-	{ 480000, ACPU_PLL_1, 1, 1, 120000, 3, VDD_6, 120000, 0, 2, -1 },
-	{ 528000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x1b },
-	{ 537600, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x1c },
-	{ 556800, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x1d },
-	{ 576000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x1e },
-	{ 595200, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x1f },
-	{ 614400, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x20 },
-	{ 633600, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x21 },
-	{ 652800, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x22 },
-	{ 672000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x23 },
-	{ 691200, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x24 },
-	{ 710400, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x25 },
-	{ 729600, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x26 },
-	{ 748800, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x27 },
-	{ 768000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x28 },
-	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+static struct clkctl_acpu_speed  acpu_freq_tbl[] = {
+#if defined(CONFIG_JESUS_PHONE)
+/* 0*/	{ 19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, 0, 3 },
+/* 1*/	{ 122880, ACPU_PLL_0, 4, 1, 61440, 1, VDD_3, 61440, 0, 0, 4 },
+/* 2*/	{ 160000, ACPU_PLL_1, 1, 5, 53333, 2, VDD_3, 61440, 0, 0, 6 },
+/* 3*/	{ 176000, ACPU_PLL_2, 2, 5, 88000, 1, VDD_3, 61440, 0, 0, 6 },
+/* 4*/	{ 245760, ACPU_PLL_0, 4, 0, 81920, 2, VDD_4, 61440, 0, 0, 6 },
+/* 5*/	{ 264000, ACPU_PLL_2, 2, 3, 88000, 2, VDD_3, 128000, 0, 0, 8 },
+/* 6*/	{ 352000, ACPU_PLL_2, 2, 2, 88000, 3, VDD_5, 128000, 0, 3, 13 },
+/* 7*/	{ 480000, ACPU_PLL_1, 1, 1, 120000, 3, VDD_6, 120000, 0, 4, 20 },
+/* 8*/	{ 518400, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1, 0x1b },
+/* 9*/	{ 528000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 5, -1 },
+/*10*/	{ 537600, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 6, -1, 0x1c },
+/*11*/	{ 556800, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 6, -1, 0x1d },
+/*12*/	{ 576000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 6, -1, 0x1e },
+/*13*/	{ 595200, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 6, -1, 0x1f },
+/*14*/	{ 614400, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x20 },
+/*15*/	{ 633600, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x21 },
+/*16*/	{ 652800, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x22 },
+/*17*/	{ 672000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x23 },
+/*18*/	{ 691200, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x24 },
+/*19*/	{ 710400, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x25 },
+/*20*/	{ 729600, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x26 },
+/*21*/	{ 748800, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x27 },
+/*22*/	{ 768000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_6, 160000, 0, 8, -1, 0x28 },
+/*23*/	{ 787200, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 160000, 0,10, -1, 0x29 },
+/*24*/	{ 806400, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 160000, 0,11, -1, 0x2a },
+/*25*/	{ 825600, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 160000, 0,12, -1, 0x2b },
+/*26*/	{ 844800, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 160000, 0,13, -1, 0x2c },
+/*27*/	{ 864000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 160000, 0,14, -1, 0x2d },
+/*28*/	{ 883200, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 160000, 0,15, -1, 0x2e },
+/*29*/	{ 902400, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 160000, 0,16, -1, 0x30 },
+/*30*/	{ 921600, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 160000, 0,17, -1, 0x31 },
+		{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
 #else
-	{ 19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, 0, 4 },
-	{ 122880, ACPU_PLL_0, 4, 1, 61440, 1, VDD_3, 61440, 0, 0, 4 },
-	{ 128000, ACPU_PLL_1, 1, 5, 64000, 1, VDD_3, 61440, 0, 0, 6 },
-	{ 176000, ACPU_PLL_2, 2, 5, 88000, 1, VDD_3, 61440, 0, 0, 5 },
-	{ 245760, ACPU_PLL_0, 4, 0, 81920, 2, VDD_4, 61440, 0, 0, 5 },
-	{ 352000, ACPU_PLL_2, 2, 2, 88000, 3, VDD_5, 128000, 0, 3, 7 },
-	{ 384000, ACPU_PLL_1, 1, 1, 128000, 2, VDD_6, 128000, 0, 2, -1 },
-	{ 528000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 128000, 0, 5, -1 },
-	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+/* 0*/	{ 19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, 0, 4 },
+/* 1*/	{ 122880, ACPU_PLL_0, 4, 1, 61440, 1, VDD_3, 61440, 0, 0, 4 },
+/* 2*/	{ 128000, ACPU_PLL_1, 1, 5, 64000, 1, VDD_3, 61440, 0, 0, 6 },
+/* 3*/	{ 176000, ACPU_PLL_2, 2, 5, 88000, 1, VDD_3, 61440, 0, 0, 5 },
+/* 4*/	{ 245760, ACPU_PLL_0, 4, 0, 81920, 2, VDD_4, 61440, 0, 0, 5 },
+/* 5*/	{ 352000, ACPU_PLL_2, 2, 2, 88000, 3, VDD_5, 128000, 0, 3, 7 },
+/* 6*/	{ 384000, ACPU_PLL_1, 1, 1, 128000, 2, VDD_6, 128000, 0, 2, -1 },
+/* 7*/	{ 528000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 128000, 0, 5, -1 },
+		{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
 #endif
 };
 
-static unsigned long max_axi_rate;
-
-#ifdef CONFIG_CPU_FREQ
-static struct cpufreq_frequency_table *freq_table;
-static struct cpufreq_frequency_table msm7227_freq_table[] = {
-	{ 0, 19200 },
-	{ 1, 122880 },
-	{ 2, 128000 },
-	{ 3, 245760 },
-	{ 4, 480000 },
-	{ 5, 600000 },
-	{ 6, CPUFREQ_TABLE_END },
-};
-
-static struct cpufreq_frequency_table msm72xx_freq_table[] = {
-#if defined(CONFIG_TURBO_MODE)
-	{ 0, 122880 },
-	{ 1, 160000 },
-	{ 2, 176000 },
-	{ 3, 245760 },
-	{ 4, 352000 },
-	{ 5, 480000 },
-	{ 6, 528000 },
-	{ 7, 537600 },
-	{ 8, 556800 },
-	{ 9, 576000 },
-	{10, 595200 },
-	{11, 614400 },
-	{12, 633600 },
-	{13, 652800 },
-	{14, 672000 },
-	{15, 691200 },
-	{16, 710400 },
-	{17, 729600 },
-	{18, 748800 },
-	{19, 768000 },
-	{20, CPUFREQ_TABLE_END },
+static struct cpufreq_frequency_table freq_table[] = {
+#if defined(CONFIG_JESUS_PHONE)
+	{ 0,  19200 },
+	{ 1, 176000 },
+	{ 2, 264000 },
+	{ 3, 352000 },
+	{ 4, 518400 },
+	{ 5, 576000 },
+	{ 6, 614400 },
+	{ 7, 633600 },
+	{ 8, 652800 },
+	{ 9, 672000 },
+	{10, 691200 },
+	{11, 710400 },
+	{12, 729600 },
+	{13, 748800 },
+	{14, CPUFREQ_TABLE_END },
 #else
 	{ 0, 19200 },
 	{ 1, 122880 },
@@ -224,80 +177,29 @@ static struct cpufreq_frequency_table msm72xx_freq_table[] = {
 	{ 6, CPUFREQ_TABLE_END },
 #endif
 };
-static struct cpufreq_frequency_table msm7227_turbo_freq_table[] = {
-	{ 0, 19200 },
-	{ 1, 122880 },
-	{ 2, 128000 },
-	{ 3, 245760 },
-	{ 4, 480000 },
-	{ 5, 800000 },
-	{ 6, CPUFREQ_TABLE_END },
-};
-
-#endif
-
-#define TABLE_CONFIG(m0, m1) { \
-	MACH_TYPE_##m0, \
-	msm##m1##_tbl, \
-	msm##m1##_freq_table \
-}
-
-struct freq_tbl_map {
-	unsigned int machine;
-	struct clkctl_acpu_speed *tbl;
-	struct cpufreq_frequency_table *freq_tbl;
-};
-
-static struct freq_tbl_map acpu_freq_tbl_list[] = {
-	TABLE_CONFIG(LEGEND, 7227),
-	TABLE_CONFIG(LATTE, 7227),
-	TABLE_CONFIG(LIBERTY, 7227),
-	TABLE_CONFIG(MARVEL, 7227),
-	TABLE_CONFIG(MARVELC, 7227),
-	TABLE_CONFIG(MARVELCT, 7227),
-	TABLE_CONFIG(ICONG, 7227_turbo),
-	TABLE_CONFIG(ICONG, 7227),
-	TABLE_CONFIG(CHACHA, 7227_turbo),
-	TABLE_CONFIG(CHACHA, 7227),
-	TABLE_CONFIG(BAHAMAS, 72xx),
-	TABLE_CONFIG(MEMPHIS, 72xx),
-	TABLE_CONFIG(PARADISE, 72xx),
-	TABLE_CONFIG(BUZZ, 72xx),
-	TABLE_CONFIG(BEE, 72xx),
-	TABLE_CONFIG(BUZZC, 72xx),
-	TABLE_CONFIG(HERO, 72xx),
-	TABLE_CONFIG(SAPPHIRE, 72xx),
-	TABLE_CONFIG(HEROC, 72xx),
-	TABLE_CONFIG(DESIREC, 72xx),
-	{ 0, 0, 0}
-};
-
-static int acpu_debug_mask;
-module_param_call(debug_mask, param_set_int, param_get_int,
-		&acpu_debug_mask, S_IWUSR | S_IRUGO);
 
 static int pc_pll_request(unsigned id, unsigned on)
 {
 	int res;
 	on = !!on;
 
-	if (acpu_debug_mask & PERF_SWITCH_PLL_DEBUG) {
-		if (on)
-			printk(KERN_DEBUG "Enabling PLL %d\n", id);
-		else
-			printk(KERN_DEBUG "Disabling PLL %d\n", id);
-	}
+#if PERF_SWITCH_DEBUG
+	if (on)
+		printk(KERN_DEBUG "Enabling PLL %d\n", id);
+	else
+		printk(KERN_DEBUG "Disabling PLL %d\n", id);
+#endif
 
 	res = msm_proc_comm(PCOM_CLKCTL_RPC_PLL_REQUEST, &id, &on);
 	if (res < 0)
 		return res;
 
-	if (acpu_debug_mask & PERF_SWITCH_PLL_DEBUG) {
-		if (on)
-			printk(KERN_DEBUG "PLL %d enabled\n", id);
-		else
-			printk(KERN_DEBUG "PLL %d disabled\n", id);
-	}
+#if PERF_SWITCH_DEBUG
+	if (on)
+		printk(KERN_DEBUG "PLL %d enabled\n", id);
+	else
+		printk(KERN_DEBUG "PLL %d disabled\n", id);
+#endif
 	return res;
 }
 
@@ -305,39 +207,27 @@ static int pc_pll_request(unsigned id, unsigned on)
 /*----------------------------------------------------------------------------
  * ARM11 'owned' clock control
  *---------------------------------------------------------------------------*/
-module_param_call(pwrc_khz, param_set_int, param_get_int,
-		&drv_state.power_collapse_khz, S_IWUSR | S_IRUGO);
-module_param_call(wfi_khz, param_set_int, param_get_int,
-		&drv_state.wait_for_irq_khz, S_IWUSR | S_IRUGO);
 
 unsigned long acpuclk_power_collapse(int from_idle)
 {
 	int ret = acpuclk_get_rate();
-	ret *= 1000;
-	if (ret > drv_state.power_collapse_khz) {
-		if (from_idle)
-			acpuclk_set_rate(drv_state.power_collapse_khz * 1000,
-					SETRATE_PC_IDLE);
-		else
-			acpuclk_set_rate(drv_state.power_collapse_khz * 1000,
-					SETRATE_PC);
-	}
-	return ret;
+	enum setrate_reason reason = (from_idle) ? SETRATE_PC_IDLE : SETRATE_PC;
+	if (ret > drv_state.power_collapse_khz)
+		acpuclk_set_rate(drv_state.power_collapse_khz * 1000, reason);
+	return ret * 1000;
 }
 
 unsigned long acpuclk_get_wfi_rate(void)
 {
-	return drv_state.wait_for_irq_khz;
+	return drv_state.wait_for_irq_khz * 1000;
 }
 
 unsigned long acpuclk_wait_for_irq(void)
 {
 	int ret = acpuclk_get_rate();
-	ret *= 1000;
 	if (ret > drv_state.wait_for_irq_khz)
-		acpuclk_set_rate(drv_state.wait_for_irq_khz * 1000,
-				SETRATE_SWFI);
-	return ret;
+		acpuclk_set_rate(drv_state.wait_for_irq_khz * 1000, SETRATE_SWFI);
+	return ret * 1000;
 }
 
 static int acpuclk_set_vdd_level(int vdd)
@@ -346,25 +236,28 @@ static int acpuclk_set_vdd_level(int vdd)
 
 	current_vdd = readl(A11S_VDD_SVS_PLEVEL_ADDR) & 0x07;
 
-	if (acpu_debug_mask & PERF_SWITCH_VDD_DEBUG)
-		printk(KERN_DEBUG "acpuclock: Switching VDD from %u -> %d\n",
-			current_vdd, vdd);
-
+#if PERF_SWITCH_DEBUG
+	printk(KERN_DEBUG "acpuclock: Switching VDD from %u -> %d\n",
+	       current_vdd, vdd);
+#endif
 	writel((1 << 7) | (vdd << 3), A11S_VDD_SVS_PLEVEL_ADDR);
 	udelay(drv_state.vdd_switch_time_us);
 	if ((readl(A11S_VDD_SVS_PLEVEL_ADDR) & 0x7) != vdd) {
-		if (acpu_debug_mask & PERF_SWITCH_VDD_DEBUG)
-			printk(KERN_ERR "acpuclock: VDD set failed\n");
+#if PERF_SWITCH_DEBUG
+		printk(KERN_ERR "acpuclock: VDD set failed\n");
+#endif
 		return -EIO;
 	}
 
-	if (acpu_debug_mask & PERF_SWITCH_VDD_DEBUG)
-		printk(KERN_DEBUG "acpuclock: VDD switched\n");
+#if PERF_SWITCH_DEBUG
+	printk(KERN_DEBUG "acpuclock: VDD switched\n");
+#endif
 	return 0;
 }
 
 /* Set proper dividers for the given clock speed. */
-static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s) {
+static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s)
+{
 	uint32_t reg_clkctl, reg_clksel, clk_div, a11_div;
 
 	/* AHB_CLK_DIV */
@@ -373,7 +266,7 @@ static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s) {
 	/* OC BEGIN */
 	a11_div=hunt_s->a11clk_src_div;
 
-	if (hunt_s->a11clk_khz > 528000 && hunt_s->pll2_lval > 0) {
+	if (hunt_s->a11clk_khz >= 518400 && hunt_s->pll2_lval > 0) {
 		a11_div = 0;
 		writel(hunt_s->a11clk_khz/19200, MSM_CLK_CTL_BASE+0x33c);
 		udelay(50);
@@ -504,15 +397,15 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 		}
 	}
 
-	/* Set wait states for CPU inbetween frequency changes */
+	/* Set wait states for CPU in/between frequency changes */
 	reg_clkctl = readl(A11S_CLK_CNTL_ADDR);
-	reg_clkctl |= (100 << 14); /* set WT_ST_CNT */
+	reg_clkctl |= (100 << 16); /* set WT_ST_CNT */
 	writel(reg_clkctl, A11S_CLK_CNTL_ADDR);
 
-	if (acpu_debug_mask & PERF_SWITCH_DEBUG)
-		printk(KERN_INFO "%s: Switching from ACPU rate %u -> %u\n",
-			__func__, strt_s->a11clk_khz * 1000,
-			tgt_s->a11clk_khz * 1000);
+#if PERF_SWITCH_DEBUG
+	printk(KERN_INFO "acpuclock: Switching from ACPU rate %u -> %u\n",
+	       strt_s->a11clk_khz * 1000, tgt_s->a11clk_khz * 1000);
+#endif
 
 	while (cur_s != tgt_s) {
 		/*
@@ -535,10 +428,10 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 		} else {
 			cur_s = tgt_s;
 		}
-		if (acpu_debug_mask & PERF_SWITCH_STEP_DEBUG)
-			printk(KERN_DEBUG "%s: STEP khz = %u, pll = %d\n",
-				__func__, cur_s->a11clk_khz, cur_s->pll);
-
+#if PERF_SWITCH_STEP_DEBUG
+		printk(KERN_DEBUG "%s: STEP khz = %u, pll = %d\n",
+			__FUNCTION__, cur_s->a11clk_khz, cur_s->pll);
+#endif
 		/* Power collapse should also request pll.(19.2->528) */
 		if (cur_s->pll != ACPU_PLL_TCXO
 		    && !(plls_enabled & (1 << cur_s->pll))) {
@@ -594,9 +487,9 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 			printk(KERN_ERR "acpuclock: Unable to drop ACPU vdd\n");
 	}
 
-	if (acpu_debug_mask & PERF_SWITCH_DEBUG)
-		printk(KERN_DEBUG "%s: ACPU speed change complete\n",
-				__func__);
+#if PERF_SWITCH_DEBUG
+	printk(KERN_DEBUG "%s: ACPU speed change complete\n", __FUNCTION__);
+#endif
 out:
 	if (reason == SETRATE_CPUFREQ)
 		mutex_unlock(&drv_state.lock);
@@ -605,25 +498,13 @@ out:
 
 static void __init acpuclk_init(void)
 {
-	struct clkctl_acpu_speed *speed, *max_s;
+	struct clkctl_acpu_speed *speed;
 	uint32_t div, sel;
 	int rc;
 
 	/*
 	 * Determine the rate of ACPU clock
 	 */
-#if !defined(CONFIG_ARCH_MSM7225)
-		if (socinfo_init() < 0)
-			BUG();
-
-		if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) > 1)
-			|| ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 1)
-			&& (SOCINFO_VERSION_MINOR(socinfo_get_version()) >= 3)))
-			{
-				printk("7x27-t write A11S_CLK_CNTL_ADDR =0x2220\n");
-				writel(0x2220,A11S_CLK_CNTL_ADDR);
-			}
-#endif
 
 	if (!(readl(A11S_CLK_SEL_ADDR) & 0x01)) { /* CLK_SEL_SRC1N0 */
 		/* CLK_SRC0_SEL */
@@ -653,18 +534,13 @@ static void __init acpuclk_init(void)
 	if (rc < 0)
 		pr_err("Setting AXI min rate failed!\n");
 
-	for (speed = acpu_freq_tbl; speed->a11clk_khz != 0; speed++)
-		;
-
-	max_s = speed - 1;
-	max_axi_rate = max_s->axiclk_khz * 1000;
-
 	printk(KERN_INFO "ACPU running at %d KHz\n", speed->a11clk_khz);
 }
 
+/* TODO return the max value the user wants the CPU to run */
 unsigned long acpuclk_get_max_axi_rate(void)
 {
-	return max_axi_rate;
+	return CONFIG_MSM_CPU_FREQ_MAX;
 }
 EXPORT_SYMBOL(acpuclk_get_max_axi_rate);
 
@@ -683,93 +559,11 @@ uint32_t acpuclk_get_switch_time(void)
 	return drv_state.acpu_switch_time_us;
 }
 
-static ssize_t acpuclk_tbl_show(struct device *dev,
-		struct device_attribute *attr, char *buffer)
-{
-	char buf[16];
-	ssize_t result = 0;
-	int i = 0;
-
-	if (freq_table == NULL) {
-		pr_info("No frequency table!\n");
-		return 0;
-	}
-
-	while (freq_table[i].frequency != CPUFREQ_TABLE_END) {
-		if (freq_table[i].frequency >=
-		    CONFIG_MSM_CPU_FREQ_ONDEMAND_MIN) {
-			memset(buf, 0, 16);
-			result += sprintf(buf, "%u,", freq_table[i].frequency);
-			strcat(buffer, buf);
-		}
-
-		i++;
-	}
-
-	buffer[result-1] = '\n';
-	return result;
-}
 /*----------------------------------------------------------------------------
  * Clock driver initialization
  *---------------------------------------------------------------------------*/
-static DEVICE_ATTR(acpuclk_tbl, 0444, acpuclk_tbl_show, NULL);
 
-static struct kobject *acpuclock_kobj;
-
-static void __init acpu_freq_tbl_fixup(void)
-{
-	int ret;
-	struct freq_tbl_map *lst;
-
-	/* Select the right table to use. */
-	for (lst = acpu_freq_tbl_list; lst->tbl != 0; lst++) {
-#if defined(CONFIG_ARCH_MSM7225)
-		if (lst->machine == machine_arch_type) {
-#else
-		if ((lst->machine == MACH_TYPE_CHACHA)||(lst->machine == MACH_TYPE_ICONG)){
-				if (socinfo_init() < 0)
-					BUG();
-				if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) > 1)
-					|| ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 1)
-					&& (SOCINFO_VERSION_MINOR(socinfo_get_version()) >= 3)))
-					{
-						acpu_freq_tbl = lst->tbl;
-						freq_table = lst->freq_tbl;
-						break;
-					}
-				else {
-					lst++;
-					acpu_freq_tbl = lst->tbl;
-					freq_table = lst->freq_tbl;
-					break;
-				}
-			}
-		else if (lst->machine == machine_arch_type) {
-#endif
-			acpu_freq_tbl = lst->tbl;
-			freq_table = lst->freq_tbl;
-			break;
-		}
-	}
-
-	if (acpu_freq_tbl == NULL) {
-		pr_info("Unknown frequency table!\n");
-		return;
-	}
-
-	acpuclock_kobj = kobject_create_and_add("acpuclock", NULL);
-	if (acpuclock_kobj == NULL) {
-		pr_info("msm_acpu_clock_init: subsystem_register failed\n");
-		return;
-	}
-
-	ret = sysfs_create_file(acpuclock_kobj, &dev_attr_acpuclk_tbl.attr);
-
-	if (ret)
-		pr_info("msm_acpu_clock_init: sysfs_create_group failed\n");
-}
-
-/* Initalize the lpj field in the acpu_freq_tbl. */
+/* Initialize the lpj field in the acpu_freq_tbl. */
 static void __init lpj_init(void)
 {
 	int i;
@@ -793,10 +587,9 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 	drv_state.vdd_switch_time_us = clkdata->vdd_switch_time_us;
 	drv_state.power_collapse_khz = clkdata->power_collapse_khz;
 	drv_state.wait_for_irq_khz = clkdata->wait_for_irq_khz;
-	acpu_freq_tbl_fixup();
 	acpuclk_init();
 	lpj_init();
-#ifdef CONFIG_CPU_FREQ
+#ifdef CONFIG_CPU_FREQ_TABLE
 	cpufreq_frequency_table_get_attr(freq_table, smp_processor_id());
 #endif
 }
